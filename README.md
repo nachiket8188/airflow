@@ -17,7 +17,9 @@ Following steps are the things I did on my local Windows machine to set the envi
        and following command:
         `pip install "apache-airflow[amazon,postgres, snowflake]==2.10.5" --constraint "https://raw.githubusercontent.com/apache/airflow/constraints-2.10.5/constraints-3.9.txt"`
     4. Create AWS Trial account for free access to services like S3, Glue etc.
-    5. Configure AWS Keys using ENVIRONMENT VARIABLES.
-    6. Create Snowflake Trial account.
-    7. Configure Git and GitHub with .gitignore, .gitkeep (initially I had empty directories that I wanted tracked)
-    8. 
+    5. Install AWS-CLI to enable running of scripts for various purposes.
+    6. Configure AWS Keys using AWS CLI. The final version of DAG mark_1 relies on credentials/keys configured using 
+       AWS CLI tool (such as region, user etc.) and role ARN is specified in .env file (not published).
+    7. Create Snowflake Trial account. Snowflake connection parameters are specified in .env file.
+    8. Configure Git and GitHub with .gitignore, .gitkeep (initially I had empty directories that I wanted tracked)
+    9. 
