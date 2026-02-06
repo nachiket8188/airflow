@@ -23,3 +23,15 @@ Following steps are the things I did on my local Windows machine to set the envi
     7. Create Snowflake Trial account. Snowflake connection parameters are specified in .env file.
     8. Configure Git and GitHub with .gitignore, .gitkeep (initially I had empty directories that I wanted tracked)
     9. 
+
+## Current POCs (DAGs)
+
+This repo will eventually contain multiple Airflow + Snowflake (and possibly dbt) POCs. For now, there are two:
+
+1. **Mark 1: S3 to Snowflake**  
+   DAG file: `./dags/mark_1/s3_to_snowflake.py`  
+   Summary: Downloads a CSV from S3, aggregates sales by product category with pandas, and loads the results into Snowflake.
+
+2. **Mark 2: SQL Server to Snowflake**  
+   DAG file: `./dags/mark_2/sqlserver_to_snowflake.py`  
+   Summary: Parameterized DAG that selects a SQL Server table, validates target row count in Snowflake, then extracts and loads via `write_pandas`.

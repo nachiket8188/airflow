@@ -17,7 +17,6 @@ def get_connection(conn_string:str) -> pyodbc.Connection:
         conn = connect(conn_string)
     except Exception as e:
         print(f"Ran into an error while connecting to SQL-Server: {e}")
-        # logger.info(f"Ran into an error while connecting to SQL-Server: {e}")
     finally:
         return conn
 

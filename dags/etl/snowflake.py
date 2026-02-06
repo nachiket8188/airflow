@@ -13,8 +13,8 @@ def create_connection(conn_params:dict) -> snowflake.connector.SnowflakeConnecti
             password=conn_params.get('pass'),
             account=conn_params.get('account'),
             warehouse=conn_params.get('wh'),
-            database=conn_params.get('db'),
-            schema=conn_params.get('schema')
+            database=conn_params.get('db')
+            # schema=conn_params.get('schema')
         )
     except Exception as e:
         logger.info(f"Ran into an error while connecting to Snowflake: {e}")
