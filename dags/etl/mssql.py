@@ -8,6 +8,43 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
+"""
+    
+"""
+DATE_DATA_TYPES = {
+    "date",
+    "datetime",
+    "datetime2",
+    "datetimeoffset",
+    "smalldatetime",
+}
+
+DATE_COLUMN_NAME_SUFFIXES = (
+    "date",
+    "datetime",
+    "timestamp",
+)
+
+# Special-type extract handling is kept here as reference, but intentionally
+# commented out. Current approach: keep raw-landed special/spatial columns as
+# VARCHAR-like columns in Snowflake and apply explicit conversion later.
+#
+# SPECIAL_TYPE_SELECTORS = {
+#     "geography": "[{column_name}].STAsText() AS [{column_name}]",
+#     "geometry": "[{column_name}].STAsText() AS [{column_name}]",
+#     "hierarchyid": "[{column_name}].ToString() AS [{column_name}]",
+#     "xml": "CAST([{column_name}] AS NVARCHAR(MAX)) AS [{column_name}]",
+#     "sql_variant": "CAST([{column_name}] AS NVARCHAR(MAX)) AS [{column_name}]",
+#     "uniqueidentifier": "CAST([{column_name}] AS VARCHAR(36)) AS [{column_name}]",
+#     "binary": "CONVERT(VARCHAR(MAX), [{column_name}], 2) AS [{column_name}]",
+#     "varbinary": "CONVERT(VARCHAR(MAX), [{column_name}], 2) AS [{column_name}]",
+#     "image": "CONVERT(VARCHAR(MAX), [{column_name}], 2) AS [{column_name}]",
+#     "rowversion": "CONVERT(VARCHAR(MAX), [{column_name}], 2) AS [{column_name}]",
+#     "timestamp": "CONVERT(VARCHAR(MAX), [{column_name}], 2) AS [{column_name}]",
+# }
+#
+# SPECIAL_SQLSERVER_TYPES = set(SPECIAL_TYPE_SELECTORS)
+
 def get_connection(conn_string:str) -> pyodbc.Connection:
     """
     Creates an ODBC connection to SQL Server Instance based on input parameters and returns the Connection obj.
@@ -58,3 +95,94 @@ def get_schema_table_list(conn:pyodbc.Connection) -> list:
     rows = cursor.fetchall()
     tables_list = [tuple(row) for row in rows]
     return tables_list
+
+# def get_safe_select_query(conn: pyodbc.Connection, schema: str, table: str) -> str:
+#     """
+#     Builds a SELECT statement for the given table that serializes SQL Server
+#     types that do not round-trip cleanly through pyodbc/pandas.
+#     """
+#     cursor = conn.cursor()
+#     cursor.execute(
+#         """
+#         SELECT COLUMN_NAME, DATA_TYPE
+#         FROM   INFORMATION_SCHEMA.COLUMNS
+#         WHERE  TABLE_SCHEMA = ?
+#           AND  TABLE_NAME = ?
+#         ORDER BY ORDINAL_POSITION
+#         """,
+#         schema,
+#         table,
+#     )
+#     cols = cursor.fetchall()
+#     select_parts = []
+#
+#     for col_name, data_type in cols:
+#         normalized_type = data_type.lower()
+#         selector = SPECIAL_TYPE_SELECTORS.get(normalized_type)
+#         if selector:
+#             select_parts.append(selector.format(column_name=col_name))
+#             continue
+#
+#         select_parts.append(f"[{col_name}]")
+#
+#     return f"SELECT {', '.join(select_parts)} FROM [{schema}].[{table}]"
+
+
+def get_temporal_columns(conn: pyodbc.Connection, schema: str, table: str) -> dict[str, str]:
+    """
+    Returns source column names that should be normalized as dates/timestamps
+    before loading to Snowflake, along with their SQL Server data types.
+
+    Primary signal: SQL Server date-like data types.
+    Fallback signal: column names that clearly look date-like, which handles
+    tables where dates are stored in string/varchar columns.
+    """
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT COLUMN_NAME, DATA_TYPE
+        FROM   INFORMATION_SCHEMA.COLUMNS
+        WHERE  TABLE_SCHEMA = ?
+          AND  TABLE_NAME = ?
+        ORDER BY ORDINAL_POSITION
+        """,
+        schema,
+        table,
+    )
+    temporal_columns = {}
+    for column_name, data_type in cursor.fetchall():
+        normalized_name = column_name.replace("_", "").lower()
+        normalized_type = data_type.lower()
+        if (
+            normalized_type in DATE_DATA_TYPES
+            or normalized_name.endswith(DATE_COLUMN_NAME_SUFFIXES)
+        ):
+            temporal_columns[column_name] = normalized_type
+
+    return temporal_columns
+
+
+# def get_special_columns(conn: pyodbc.Connection, schema: str, table: str) -> dict[str, str]:
+#     """
+#     Returns SQL Server columns whose source data types need special handling
+#     during extraction/loading.
+#     """
+#     cursor = conn.cursor()
+#     cursor.execute(
+#         """
+#         SELECT COLUMN_NAME, DATA_TYPE
+#         FROM   INFORMATION_SCHEMA.COLUMNS
+#         WHERE  TABLE_SCHEMA = ?
+#           AND  TABLE_NAME = ?
+#         ORDER BY ORDINAL_POSITION
+#         """,
+#         schema,
+#         table,
+#     )
+#     special_columns = {}
+#     for column_name, data_type in cursor.fetchall():
+#         normalized_type = data_type.lower()
+#         if normalized_type in SPECIAL_SQLSERVER_TYPES:
+#             special_columns[column_name] = normalized_type
+#
+#     return special_columns

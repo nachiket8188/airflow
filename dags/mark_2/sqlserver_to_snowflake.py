@@ -8,8 +8,15 @@ from airflow.decorators import dag, task
 from airflow.exceptions import AirflowSkipException
 from airflow.sdk import Param
 from etl.snowflake import (create_connection)
+# from etl.snowflake import (create_connection, get_table_column_types)
 from snowflake.connector.pandas_tools import write_pandas
-from etl.mssql import (get_connection, get_schema_table_list)
+from etl.mssql import (
+    get_connection,
+    # get_special_columns,
+    # get_safe_select_query,
+    get_schema_table_list,
+    get_temporal_columns,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +61,18 @@ modified_schema_table_list = list(str(pair[:2]) for pair in schema_table_list) #
     }
      )
 def generate_dag():
+    # Learning note:
+    # For raw landing, keep temporal and special/spatial source fields in
+    # Snowflake as VARCHAR-like columns where needed, then do explicit typed
+    # conversion in a later Snowflake step. This DAG currently applies only the
+    # temporal normalization needed before the initial load.
+    #
+    # text_compatible_snowflake_types = {
+    #     "TEXT",
+    #     "VARCHAR",
+    #     "STRING",
+    # }
+
     @task(task_id='do_validation')
     def process_input(**context) -> tuple:
         selected_schema_and_table_combination = context["params"]["table_name"]
@@ -80,21 +99,82 @@ def generate_dag():
 
     @task(task_id='read_data')
     def read_data(input_tup: tuple) -> pd.DataFrame:
+        # query = get_safe_select_query(conn, input_tup[0], input_tup[1])
+        # logger.info("Using metadata-driven extract query for %s.%s", input_tup[0], input_tup[1])
         query = f"""select * from {input_tup[0]}.{input_tup[1]};
         """
         df = pd.read_sql(sql=query, con=conn)
-        return {"dataframe": df, "tuple": input_tup}
+        temporal_columns = get_temporal_columns(conn, input_tup[0], input_tup[1])
+        # special_columns = get_special_columns(conn, input_tup[0], input_tup[1])
+        return {
+            "dataframe": df,
+            "tuple": input_tup,
+            "temporal_columns": temporal_columns,
+            # "special_columns": special_columns,
+        }
 
     @task(task_id='write_data')
     def write_data(input_dict: dict):
         input_df = input_dict["dataframe"]
         input_df.columns = input_df.columns.str.upper()
-
-        # Assuming your original column is already a proper pandas datetime object
-        input_df['MODIFIEDDATE'] = input_df['MODIFIEDDATE'].dt.strftime('%Y-%m-%d %H:%M:%S.%f')
+        temporal_columns = {
+            column_name.upper(): data_type
+            for column_name, data_type in input_dict.get("temporal_columns", {}).items()
+        }
+        for column_name, data_type in temporal_columns.items():
+            if column_name not in input_df.columns:
+                continue
+            original_non_null = input_df[column_name].notna().sum()
+            input_df[column_name] = pd.to_datetime(
+                input_df[column_name],
+                errors="coerce",
+            )
+            coerced_to_null = original_non_null - input_df[column_name].notna().sum()
+            if coerced_to_null:
+                logger.warning(
+                    "Column %s had %s invalid date values coerced to null before Snowflake load.",
+                    column_name,
+                    coerced_to_null,
+                )
+            logger.info(
+                "Prepared temporal column %s from SQL Server type %s with pandas dtype %s.",
+                column_name,
+                data_type,
+                input_df[column_name].dtype,
+            )
 
         input_tup =input_dict["tuple"]
         snowflake_conn = create_connection(snowflake_conn_params)
+        # Special/spatial-type compatibility checks are intentionally commented
+        # out for now. The current intended raw-layer design is to keep such
+        # columns as VARCHAR-like columns in Snowflake and convert later.
+        #
+        # target_column_types = get_table_column_types(
+        #     snowflake_conn,
+        #     snowflake_conn_params["db"],
+        #     input_tup[0].upper(),
+        #     input_tup[1].upper(),
+        # )
+        # special_columns = {
+        #     column_name.upper(): data_type
+        #     for column_name, data_type in input_dict.get("special_columns", {}).items()
+        # }
+        # incompatible_columns = []
+        # for column_name, source_type in special_columns.items():
+        #     target_type = target_column_types.get(column_name)
+        #     if target_type and target_type not in text_compatible_snowflake_types:
+        #         incompatible_columns.append((column_name, source_type, target_type))
+        #
+        # if incompatible_columns:
+        #     formatted_columns = ", ".join(
+        #         f"{column_name} ({source_type} -> {target_type})"
+        #         for column_name, source_type, target_type in incompatible_columns
+        #     )
+        #     raise ValueError(
+        #         "Destination Snowflake table is not compatible with special SQL Server types "
+        #         f"serialized as text: {formatted_columns}. Load these columns into VARCHAR/TEXT "
+        #         "in the raw table first, then cast in a downstream Snowflake transform."
+        #     )
 
         snowflake_conn.cursor().execute("ALTER SESSION SET TIMESTAMP_INPUT_FORMAT = 'YYYY-MM-DD HH24:MI:SS.FF9';")
 
@@ -104,7 +184,8 @@ def generate_dag():
         success, nchunks, nrows, _ = write_pandas(conn=snowflake_conn, df=input_df,
                                                   database=list({snowflake_conn_params['db']})[0],
                                                   schema=schema,
-                                                  table_name=table)
+                                                  table_name=table,
+                                                  use_logical_type=True)
         logger.info(f"success : {success} \n nchunks : {nchunks} \n nrows : {nrows} \n _ : {_}")
         conn.close()
 
