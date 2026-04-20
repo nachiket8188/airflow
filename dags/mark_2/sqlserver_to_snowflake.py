@@ -61,17 +61,21 @@ modified_schema_table_list = list(str(pair[:2]) for pair in schema_table_list) #
     }
      )
 def generate_dag():
-    # Learning note:
-    # For raw landing, keep temporal and special/spatial source fields in
-    # Snowflake as VARCHAR-like columns where needed, then do explicit typed
-    # conversion in a later Snowflake step. This DAG currently applies only the
-    # temporal normalization needed before the initial load.
-    #
-    # text_compatible_snowflake_types = {
-    #     "TEXT",
-    #     "VARCHAR",
-    #     "STRING",
-    # }
+    """
+    Learning note:
+    For raw landing, keep temporal and special/spatial source fields in
+    Snowflake as VARCHAR-like columns where needed, then do explicit typed
+    conversion in a later Snowflake step. This DAG currently applies only the
+    temporal normalization needed before the initial load.
+    """
+
+    """
+    text_compatible_snowflake_types = {
+        "TEXT",
+        "VARCHAR",
+        "STRING",
+    }
+    """
 
     @task(task_id='do_validation')
     def process_input(**context) -> tuple:
@@ -98,7 +102,7 @@ def generate_dag():
             return "skip_and_end_task"
 
     @task(task_id='read_data')
-    def read_data(input_tup: tuple) -> pd.DataFrame:
+    def read_data(input_tup: tuple) -> dict:
         # query = get_safe_select_query(conn, input_tup[0], input_tup[1])
         # logger.info("Using metadata-driven extract query for %s.%s", input_tup[0], input_tup[1])
         query = f"""select * from {input_tup[0]}.{input_tup[1]};
@@ -175,8 +179,6 @@ def generate_dag():
         #         f"serialized as text: {formatted_columns}. Load these columns into VARCHAR/TEXT "
         #         "in the raw table first, then cast in a downstream Snowflake transform."
         #     )
-
-        snowflake_conn.cursor().execute("ALTER SESSION SET TIMESTAMP_INPUT_FORMAT = 'YYYY-MM-DD HH24:MI:SS.FF9';")
 
         schema = input_tup[0].upper()
         table = input_tup[1].upper()
