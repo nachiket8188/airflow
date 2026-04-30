@@ -13,7 +13,7 @@ from snowflake.connector.pandas_tools import write_pandas
 from etl.mssql import (
     get_connection,
     # get_special_columns,
-    # get_safe_select_query,
+    get_safe_select_query,
     get_schema_table_list,
     get_temporal_columns,
 )
@@ -103,10 +103,8 @@ def generate_dag():
 
     @task(task_id='read_data')
     def read_data(input_tup: tuple) -> dict:
-        # query = get_safe_select_query(conn, input_tup[0], input_tup[1])
-        # logger.info("Using metadata-driven extract query for %s.%s", input_tup[0], input_tup[1])
-        query = f"""select * from {input_tup[0]}.{input_tup[1]};
-        """
+        query = get_safe_select_query(conn, input_tup[0], input_tup[1])
+        logger.info("Using metadata-driven extract query for %s.%s", input_tup[0], input_tup[1])
         df = pd.read_sql(sql=query, con=conn)
         temporal_columns = get_temporal_columns(conn, input_tup[0], input_tup[1])
         # special_columns = get_special_columns(conn, input_tup[0], input_tup[1])
